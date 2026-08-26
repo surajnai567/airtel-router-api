@@ -1,0 +1,6 @@
+requests
+pycryptodome
+python-dotenv
+fastapi
+uvicorn
+mcp
