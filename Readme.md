@@ -235,38 +235,6 @@ if router.login():
 
 ---
 
-## 🔬 How It Works (Technical Deep Dive)
-
-The Nokia GPON router uses client-side JavaScript encryption for authentication and all state-modifying requests:
-
-```
-[Client]                                                        [Router]
-   |                                                                |
-   |---- 1. GET / (Fetch login page) ------------------------------>|
-   |<--- Returns RSA Public Key, Nonce, CSRF Token -----------------|
-   |                                                                |
-   |-- 2. Generate random AES-128 Key & IV                          |
-   |-- 3. AES-CBC encrypt (Payload: user, pass, csrf, nonce)        |
-   |-- 4. RSA-PKCS1v1_5 encrypt (AES Key + IV info string)          |
-   |                                                                |
-   |---- 5. POST /login.cgi (Encrypted payload + RSA key envelope) ->|
-   |<--- Returns HTTP 299 + X-SID Session Header -------------------|
-   |                                                                |
-   |---- 6. GET /parental_control.cgi (Authenticated) ------------->|
-   |<--- Returns HTML with embedded JS data arrays -----------------|
-   |                                                                |
-   |---- 7. Encrypted POST /parental_control.cgi?add (Block MAC) -->|
-   |<--- Returns HTTP 200 OK ---------------------------------------|
-```
-
-1. **Parameter Extraction:** When fetching the landing page, we extract the RSA public key (`-----BEGIN PUBLIC KEY-----`), a cryptographic `nonce`, and a `csrf_token`.
-2. **Payload Encryption:** A random 16-byte AES key and IV are generated. The payload (`username`, `password`, `csrf_token`, `nonce`, and URL-escaped AES parameters) is encrypted via **AES-128-CBC** with PKCS7 padding.
-3. **Envelope Encryption:** The AES key and IV are encoded and encrypted with the router's **RSA public key** using PKCS#1 v1.5.
-4. **Session Management:** The router responds with HTTP status `299` and an `X-SID` header containing the session ID.
-5. **Data Extraction & Actions:** Devices are parsed from JavaScript variables (`device_cfg`, `pc_config`) inside `/parental_control.cgi`, and blocking rules are dispatched via encrypted AJAX POST payloads.
-
----
-
 ## 📁 Project Structure
 
 ```
