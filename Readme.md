@@ -1,5 +1,7 @@
 # Nokia / Airtel GPON Home Router API
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 > Control and automate your **Nokia G-2425G-A GPON Home Gateway** (commonly deployed by **Airtel Xstream Fiber** and other ISPs) via **CLI**, **REST API**, and **MCP (Model Context Protocol)** — without any browser automation!
 
 ---
@@ -270,3 +272,9 @@ routerapi/
 - **Session Expiry:** Router sessions naturally time out after inactivity. The API and MCP servers automatically manage re-authentication on subsequent calls.
 - **Parental Control:** Blocking is performed by enabling Parental Control / Access Control rules that restrict target MAC addresses 24/7 across all days of the week (`00:00-23:59`).
 - **Compatibility:** Tested on **Nokia G-2425G-A GPON Home Gateway** (Airtel Xstream Fiber). May also work with similar Nokia ONT models with identical firmware interfaces.
+
+---
+
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](file:///d:/project/routerapi/LICENSE) file for details.
