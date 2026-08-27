@@ -25,6 +25,13 @@ from .crypto import (
     encrypt_post_data,
     aes_cbc_decrypt,
 )
+from .db import (
+    upsert_device,
+    get_device,
+    get_all_devices,
+    find_device_by_query,
+    set_device_nickname as db_set_device_nickname,
+)
 
 import warnings
 import urllib3
@@ -347,23 +354,99 @@ class RouterAPI:
 
     # ===================== PUBLIC API METHODS =====================
 
-    def list_devices(self):
+    def resolve_device(self, target: str) -> tuple[str, str]:
         """
-        List all connected/known devices on the network.
-        Returns a list of dicts: [{hostname, ip, mac, active, interface}, ...]
+        Resolve a target identifier (MAC, Nickname, Hostname, or IP) to (mac_address, display_name).
+        Raises ValueError if target cannot be found.
+        """
+        target_clean = target.strip()
+        if not target_clean:
+            raise ValueError("Target device identifier cannot be empty.")
+
+        # 1. Direct valid MAC address
+        mac_direct = normalize_mac(target_clean)
+        if mac_direct:
+            db_dev = get_device(mac_direct)
+            display_name = (db_dev.get("nickname") or db_dev.get("hostname") or mac_direct) if db_dev else mac_direct
+            return mac_direct, display_name
+
+        # 2. Search local DB first
+        matches = find_device_by_query(target_clean)
+        if matches:
+            top = matches[0]
+            display = top.get("nickname") or top.get("hostname") or top["mac"]
+            return top["mac"], display
+
+        # 3. Refresh devices from router and search again
+        self.list_devices(sync_db=True)
+        matches = find_device_by_query(target_clean)
+        if matches:
+            top = matches[0]
+            display = top.get("nickname") or top.get("hostname") or top["mac"]
+            return top["mac"], display
+
+        raise ValueError(f"Could not find any device matching '{target_clean}'. Check the nickname/hostname or run list_devices.")
+
+    def set_nickname(self, target: str, nickname: str | None, notes: str | None = None) -> tuple[bool, str, str]:
+        """
+        Set or update nickname for a device.
+        Returns (success, mac_address, display_name).
+        """
+        mac_address, display_name = self.resolve_device(target)
+        success = db_set_device_nickname(mac_address, nickname, notes)
+        return success, mac_address, nickname or display_name
+
+    def list_devices(self, sync_db: bool = True) -> list[dict]:
+        """
+        List all connected/known devices on the network, enriched with DB nicknames and blocked status.
+        Returns a list of dicts: [{hostname, ip, mac, active, interface, nickname, is_blocked}, ...]
         """
         html = self._get_page("/parental_control.cgi")
         if not html:
-            return []
+            if not sync_db:
+                return []
+            db_devices = get_all_devices()
+            return [{
+                "oid": None,
+                "hostname": d.get("hostname") or "(unknown)",
+                "ip": d.get("last_ip") or "",
+                "mac": d["mac"],
+                "active": False,
+                "interface": d.get("last_interface") or "",
+                "nickname": d.get("nickname"),
+                "is_blocked": bool(d.get("is_blocked")),
+            } for d in db_devices]
 
         devices = self._parse_device_cfg(html)
-        logger.info(f"Found {len(devices)} devices.")
-        return devices
+        blocked_devices = self.list_blocked_devices()
+        blocked_macs = {b["mac"].lower() for b in blocked_devices}
 
-    def list_blocked_devices(self):
+        enriched = []
+        for d in devices:
+            mac_norm = normalize_mac(d["mac"]) or d["mac"].lower()
+            is_blocked = mac_norm in blocked_macs
+            if sync_db:
+                upsert_device(
+                    mac=mac_norm,
+                    hostname=d["hostname"],
+                    ip=d["ip"],
+                    interface=d["interface"],
+                    is_blocked=is_blocked,
+                )
+            db_entry = get_device(mac_norm) if sync_db else None
+            enriched.append({
+                **d,
+                "nickname": db_entry.get("nickname") if db_entry else None,
+                "is_blocked": is_blocked,
+            })
+
+        logger.info(f"Found {len(enriched)} devices.")
+        return enriched
+
+    def list_blocked_devices(self) -> list[dict]:
         """
         List all blocked devices (Parental Control / Access Control policies).
-        Returns a list of dicts with policy info and blocked MAC addresses.
+        Returns a list of dicts with policy info, nickname, and blocked MAC addresses.
         """
         html = self._get_page("/parental_control.cgi")
         if not html:
@@ -376,8 +459,11 @@ class RouterAPI:
             for grp in new_groups:
                 if grp["access_internet"] == 0 or (not grp["home_group"] and grp["name"].lower() == "blocked"):
                     for dev in grp["devices"]:
+                        mac_clean = dev["MACAddress"].lower()
+                        db_dev = get_device(mac_clean)
                         blocked.append({
                             "mac": dev["MACAddress"],
+                            "nickname": db_dev.get("nickname") if db_dev else None,
                             "mac_oid": dev["_oid"],
                             "policy_name": grp["name"],
                             "policy_oid": grp["oid"],
@@ -395,8 +481,11 @@ class RouterAPI:
             blocked = []
             for policy in pc_config["AccessPolicy"]:
                 for mac_entry in policy["macs"]:
+                    mac_clean = mac_entry["SourceMAC"].lower()
+                    db_dev = get_device(mac_clean)
                     blocked.append({
                         "mac": mac_entry["SourceMAC"],
+                        "nickname": db_dev.get("nickname") if db_dev else None,
                         "mac_oid": mac_entry["_oid"],
                         "policy_name": policy["name"],
                         "policy_oid": policy["oid"],
@@ -410,23 +499,24 @@ class RouterAPI:
 
         return []
 
-    def block_device(self, mac_address, policy_name=None):
+    def block_device(self, target: str, policy_name: str | None = None) -> bool:
         """
-        Block a device from internet access by its MAC address.
+        Block a device from internet access by MAC address, Nickname, Hostname, or IP.
 
         Args:
-            mac_address: The MAC address to block (e.g., "AA:BB:CC:DD:EE:FF")
+            target: MAC address, Nickname, Hostname, or IP of the device
             policy_name: Optional policy name
 
         Returns:
             True on success, False on failure.
         """
-        clean_mac = normalize_mac(mac_address)
-        if not clean_mac:
-            logger.error(f"Invalid MAC address format: '{mac_address}'. Expected format: AA:BB:CC:DD:EE:FF")
+        try:
+            mac_address, display_name = self.resolve_device(target)
+        except ValueError as e:
+            logger.error(str(e))
             return False
-        mac_address = clean_mac
-        logger.info(f"Blocking device {mac_address}...")
+
+        logger.info(f"Blocking device '{display_name}' ({mac_address})...")
 
         html = self._get_page("/parental_control.cgi")
         if not html:
@@ -479,6 +569,7 @@ class RouterAPI:
             for dev in blocked_group.get("devices", []):
                 if dev["MACAddress"].lower() == mac_address:
                     logger.info(f"Device {mac_address} is already blocked.")
+                    upsert_device(mac=mac_address, is_blocked=True)
                     return True
 
             # 3. Find device in Home group (or any group) to move it
@@ -499,6 +590,7 @@ class RouterAPI:
                 r = self._encrypted_post("/parental_control.cgi?move_device_N", post_data)
                 if r and r.status_code == 200:
                     logger.info(f"Successfully blocked {mac_address} (moved to group {blocked_group['name']})!")
+                    upsert_device(mac=mac_address, is_blocked=True)
                     return True
             else:
                 # Add device to blocked group directly
@@ -506,6 +598,7 @@ class RouterAPI:
                 r = self._encrypted_post("/parental_control.cgi?add_device_N", post_data)
                 if r and r.status_code == 200:
                     logger.info(f"Successfully blocked {mac_address} (added to group {blocked_group['name']})!")
+                    upsert_device(mac=mac_address, is_blocked=True)
                     return True
 
             logger.error(f"Failed to move/add device {mac_address} to blocked group.")
@@ -537,26 +630,28 @@ class RouterAPI:
         r = self._encrypted_post("/parental_control.cgi?add", post_data)
         if r and r.status_code == 200:
             logger.info(f"Successfully blocked {mac_address}!")
+            upsert_device(mac=mac_address, is_blocked=True)
             return True
 
         return False
 
-    def unblock_device(self, mac_address):
+    def unblock_device(self, target: str) -> bool:
         """
-        Remove a device from the blocked list.
+        Remove a device from the blocked list by MAC address, Nickname, Hostname, or IP.
 
         Args:
-            mac_address: The MAC address to unblock (e.g., "AA:BB:CC:DD:EE:FF")
+            target: MAC address, Nickname, Hostname, or IP of the device
 
         Returns:
             True on success, False on failure.
         """
-        clean_mac = normalize_mac(mac_address)
-        if not clean_mac:
-            logger.error(f"Invalid MAC address format: '{mac_address}'. Expected format: AA:BB:CC:DD:EE:FF")
+        try:
+            mac_address, display_name = self.resolve_device(target)
+        except ValueError as e:
+            logger.error(str(e))
             return False
-        mac_address = clean_mac
-        logger.info(f"Unblocking device {mac_address}...")
+
+        logger.info(f"Unblocking device '{display_name}' ({mac_address})...")
 
         html = self._get_page("/parental_control.cgi")
         if not html:
@@ -583,6 +678,7 @@ class RouterAPI:
 
             if target_device_oid is None:
                 logger.info(f"Device {mac_address} not found in any blocked group.")
+                upsert_device(mac=mac_address, is_blocked=False)
                 return True
 
             # Move back to Home group
@@ -590,6 +686,7 @@ class RouterAPI:
             r = self._encrypted_post("/parental_control.cgi?move_device_N", post_data)
             if r and r.status_code == 200:
                 logger.info(f"Successfully unblocked {mac_address} (moved back to Home group)!")
+                upsert_device(mac=mac_address, is_blocked=False)
                 return True
 
             logger.error(f"Failed to unblock {mac_address}.")
@@ -605,12 +702,14 @@ class RouterAPI:
 
         if target_policy_oid is None:
             logger.warning(f"MAC {mac_address} not found in any blocked policy.")
+            upsert_device(mac=mac_address, is_blocked=False)
             return False
 
         post_data = f"oid={target_policy_oid}"
         r = self._encrypted_post("/parental_control.cgi?del_pc_rule", post_data)
         if r and r.status_code == 200:
             logger.info(f"Successfully unblocked {mac_address}!")
+            upsert_device(mac=mac_address, is_blocked=False)
             return True
 
         return False
@@ -623,4 +722,5 @@ class RouterAPI:
             logger.info("Logged out.")
         except Exception:
             pass
+
 

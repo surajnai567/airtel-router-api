@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nokia GPON Gateway — Network & Device Control Center</title>
+    <meta name="description" content="Manage network devices, custom nicknames, and access control policies on Nokia GPON router.">
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <!-- Remix Icons -->
+    <link href="https://cdn.jsdelivr.net/npm/remixicon@3.5.0/fonts/remixicon.css" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="background-glow">
+        <div class="glow-sphere sphere-1"></div>
+        <div class="glow-sphere sphere-2"></div>
+        <div class="glow-sphere sphere-3"></div>
+    </div>
+
+    <div class="app-container">
+        <!-- Header -->
+        <header class="main-header">
+            <div class="brand-section">
+                <div class="logo-icon">
+                    <i class="ri-router-line"></i>
+                </div>
+                <div class="brand-text">
+                    <h1>Router Control Center</h1>
+                    <p class="subtitle">Nokia GPON Gateway • Device & Access Management</p>
+                </div>
+            </div>
+            <div class="header-actions">
+                <div class="status-indicator" id="router-status-badge">
+                    <span class="status-dot pulse"></span>
+                    <span class="status-label">Checking Router...</span>
+                </div>
+                <button class="btn btn-secondary" id="btn-refresh" title="Refresh Devices">
+                    <i class="ri-refresh-line" id="refresh-icon"></i>
+                    <span>Refresh</span>
+                </button>
+            </div>
+        </header>
+
+        <!-- Stats Bar -->
+        <section class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-icon icon-cyan">
+                    <i class="ri-devices-line"></i>
+                </div>
+                <div class="stat-content">
+                    <span class="stat-label">Total Known Devices</span>
+                    <span class="stat-value" id="stat-total">0</span>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon icon-emerald">
+                    <i class="ri-wifi-line"></i>
+                </div>
+                <div class="stat-content">
+                    <span class="stat-label">Online Active</span>
+                    <span class="stat-value" id="stat-active">0</span>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon icon-rose">
+                    <i class="ri-shield-cross-line"></i>
+                </div>
+                <div class="stat-content">
+                    <span class="stat-label">Blocked Devices</span>
+                    <span class="stat-value" id="stat-blocked">0</span>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon icon-purple">
+                    <i class="ri-bookmark-line"></i>
+                </div>
+                <div class="stat-content">
+                    <span class="stat-label">Custom Nicknames</span>
+                    <span class="stat-value" id="stat-nicknames">0</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- Controls Toolbar -->
+        <section class="controls-card">
+            <div class="search-box">
+                <i class="ri-search-2-line search-icon"></i>
+                <input type="text" id="search-input" placeholder="Search by Nickname, Hostname, IP, or MAC..." autocomplete="off">
+                <button id="clear-search" class="clear-btn" style="display: none;"><i class="ri-close-line"></i></button>
+            </div>
+            <div class="filter-tabs">
+                <button class="filter-tab active" data-filter="all">All (<span id="count-all">0</span>)</button>
+                <button class="filter-tab" data-filter="active">Online (<span id="count-active">0</span>)</button>
+                <button class="filter-tab" data-filter="blocked">Blocked (<span id="count-blocked">0</span>)</button>
+                <button class="filter-tab" data-filter="custom">Custom Nickname (<span id="count-custom">0</span>)</button>
+            </div>
+        </section>
+
+        <!-- Main Device List Section -->
+        <main class="content-card">
+            <div class="card-header">
+                <div class="card-title">
+                    <i class="ri-hard-drive-2-line"></i>
+                    <h2>Connected Devices</h2>
+                </div>
+                <div class="auto-refresh-toggle">
+                    <label class="switch">
+                        <input type="checkbox" id="auto-refresh-check">
+                        <span class="slider"></span>
+                    </label>
+                    <span class="toggle-text">Auto Sync (10s)</span>
+                </div>
+            </div>
+
+            <!-- Table Container -->
+            <div class="table-responsive">
+                <table class="device-table" id="devices-table">
+                    <thead>
+                        <tr>
+                            <th>Device Nickname</th>
+                            <th>Hostname</th>
+                            <th>IP Address</th>
+                            <th>MAC Address</th>
+                            <th>Interface</th>
+                            <th>Status</th>
+                            <th>Internet Access</th>
+                            <th class="text-right">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="device-tbody">
+                        <tr>
+                            <td colspan="8" class="loading-state">
+                                <div class="spinner"></div>
+                                <p>Loading devices from router...</p>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </main>
+    </div>
+
+    <!-- Edit Nickname Modal -->
+    <div class="modal-overlay" id="nickname-modal">
+        <div class="modal-content glass-card">
+            <div class="modal-header">
+                <div class="modal-title-box">
+                    <i class="ri-edit-2-line modal-icon"></i>
+                    <h3>Edit Device Nickname</h3>
+                </div>
+                <button class="close-btn" id="close-modal-btn"><i class="ri-close-line"></i></button>
+            </div>
+            <div class="modal-body">
+                <div class="device-summary-chip">
+                    <span id="modal-device-hostname">-</span>
+                    <span class="chip-mac" id="modal-device-mac">-</span>
+                </div>
+                <form id="nickname-form">
+                    <input type="hidden" id="modal-mac-input">
+                    <div class="form-group">
+                        <label for="modal-nickname-input">Friendly Nickname</label>
+                        <input type="text" id="modal-nickname-input" class="form-input" placeholder="e.g. Akanksha Phone, Guestroom TV, Living Room Light" maxlength="50" autofocus>
+                        <span class="input-hint">Used in AI Agent chat commands, search, and dashboard.</span>
+                    </div>
+                    <div class="form-group">
+                        <label for="modal-notes-input">Location / Notes (Optional)</label>
+                        <input type="text" id="modal-notes-input" class="form-input" placeholder="e.g. 2nd floor bedroom, 5GHz band" maxlength="100">
+                    </div>
+                    <div class="modal-actions">
+                        <button type="button" class="btn btn-danger-ghost" id="btn-clear-nickname">Clear Nickname</button>
+                        <div class="right-actions">
+                            <button type="button" class="btn btn-secondary" id="btn-cancel-modal">Cancel</button>
+                            <button type="submit" class="btn btn-primary" id="btn-save-nickname">Save Nickname</button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notification Container -->
+    <div class="toast-container" id="toast-container"></div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
