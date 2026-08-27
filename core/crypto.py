@@ -16,30 +16,34 @@ from Crypto.Cipher import PKCS1_v1_5, AES
 from Crypto.Util.Padding import pad
 
 
-def extract_login_params(html_text):
-    """Extracts pubkey, nonce, and token from the router login page HTML."""
+def extract_pubkey(html_text):
+    """Extracts RSA public key from any router HTML page."""
     pubkey_match = re.search(
         r'(-----BEGIN PUBLIC KEY-----.*?-----END PUBLIC KEY-----)',
         html_text, re.DOTALL
     )
-    nonce_match = re.search(r'var nonce = "(.*?)";', html_text)
-    token_match = re.search(r'var token\s*=\s*"(.*?)";', html_text)
-
     if not pubkey_match:
-        raise ValueError("Could not find RSA public key in login page.")
-    if not nonce_match:
-        raise ValueError("Could not find nonce in login page.")
-    if not token_match:
-        raise ValueError("Could not find csrf token in login page.")
-
-    # Clean up the PEM key - remove JS string escaping (backslashes, literal \n)
-    pubkey = pubkey_match.group(1)
-    pubkey = pubkey.replace('\\', '')
+        return None
+    pubkey = pubkey_match.group(1).replace('\\', '')
     lines = [l.strip() for l in pubkey.split('\n') if l.strip()]
     header = lines[0]
     footer = lines[-1]
     body = ''.join(lines[1:-1])
-    pubkey = header + '\n' + body + '\n' + footer
+    return header + '\n' + body + '\n' + footer
+
+
+def extract_login_params(html_text):
+    """Extracts pubkey, nonce, and token from the router login page HTML."""
+    pubkey = extract_pubkey(html_text)
+    if not pubkey:
+        raise ValueError("Could not find RSA public key in login page.")
+    nonce_match = re.search(r'var nonce = "(.*?)";', html_text)
+    token_match = re.search(r'var token\s*=\s*"(.*?)";', html_text)
+
+    if not nonce_match:
+        raise ValueError("Could not find nonce in login page.")
+    if not token_match:
+        raise ValueError("Could not find csrf token in login page.")
 
     return pubkey, nonce_match.group(1), token_match.group(1)
 

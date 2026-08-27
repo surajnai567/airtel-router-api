@@ -20,7 +20,7 @@ from mcp.server.mcpserver import MCPServer
 
 load_dotenv()
 
-from core import RouterAPI
+from core import RouterAPI, normalize_mac
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +44,7 @@ def _get_router() -> RouterAPI:
             password=os.getenv("ROUTER_PASSWORD", "admin"),
         )
         if not _router.login():
-            raise RuntimeError("Failed to authenticate with router")
+            raise RuntimeError("Failed to authenticate with router. Please check ROUTER_IP, ROUTER_USERNAME, and ROUTER_PASSWORD.")
     return _router
 
 
@@ -80,8 +80,11 @@ def list_devices() -> str:
     Returns a table of devices with hostname, IP address, MAC address,
     active status, and interface type.
     """
-    router = _get_router()
-    devices = router.list_devices()
+    try:
+        router = _get_router()
+        devices = router.list_devices()
+    except Exception as e:
+        return f"Error connecting to router: {e}"
 
     if not devices:
         return "No devices found."
@@ -106,8 +109,11 @@ def list_blocked_devices() -> str:
 
     Returns a table of blocked MAC addresses with their policy info.
     """
-    router = _get_router()
-    blocked = router.list_blocked_devices()
+    try:
+        router = _get_router()
+        blocked = router.list_blocked_devices()
+    except Exception as e:
+        return f"Error connecting to router: {e}"
 
     if not blocked:
         return "No blocked devices."
@@ -129,18 +135,23 @@ def list_blocked_devices() -> str:
 def block_device(mac_address: str, policy_name: str | None = None) -> str:
     """Block a device from internet access by its MAC address.
 
-    Creates a Parental Control / Access Control policy that blocks the device 24/7.
-
     Args:
         mac_address: The MAC address to block (e.g., "AA:BB:CC:DD:EE:FF")
         policy_name: Optional custom name for the blocking policy
     """
-    router = _get_router()
-    success = router.block_device(mac_address, policy_name)
+    clean_mac = normalize_mac(mac_address)
+    if not clean_mac:
+        return f"Invalid MAC address format: '{mac_address}'. Expected format: AA:BB:CC:DD:EE:FF"
+
+    try:
+        router = _get_router()
+        success = router.block_device(clean_mac, policy_name)
+    except Exception as e:
+        return f"Error communicating with router: {e}"
 
     if success:
-        return f"Successfully blocked {mac_address}."
-    return f"Failed to block {mac_address}. Check logs for details."
+        return f"Successfully blocked {clean_mac}."
+    return f"Failed to block {clean_mac}. Check router status and logs."
 
 
 @mcp.tool()
@@ -150,12 +161,19 @@ def unblock_device(mac_address: str) -> str:
     Args:
         mac_address: The MAC address to unblock (e.g., "AA:BB:CC:DD:EE:FF")
     """
-    router = _get_router()
-    success = router.unblock_device(mac_address)
+    clean_mac = normalize_mac(mac_address)
+    if not clean_mac:
+        return f"Invalid MAC address format: '{mac_address}'. Expected format: AA:BB:CC:DD:EE:FF"
+
+    try:
+        router = _get_router()
+        success = router.unblock_device(clean_mac)
+    except Exception as e:
+        return f"Error communicating with router: {e}"
 
     if success:
-        return f"Successfully unblocked {mac_address}."
-    return f"Failed to unblock {mac_address}. The MAC may not be in any blocked policy."
+        return f"Successfully unblocked {clean_mac}."
+    return f"Failed to unblock {clean_mac}. The MAC address may not currently be blocked."
 
 
 if __name__ == "__main__":
