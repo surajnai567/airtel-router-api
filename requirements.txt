@@ -1,6 +1,8 @@
-requests
-pycryptodome
-python-dotenv
-fastapi
-uvicorn
-mcp
+requests==2.34.2
+pycryptodome==3.24.0
+python-dotenv==1.2.4
+fastapi==0.142.2
+uvicorn==0.54.0
+mcp==2.3.0
+pydantic==2.13.5
+pydantic-core==2.46.5

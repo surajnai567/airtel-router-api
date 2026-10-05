@@ -6,4 +6,5 @@ dist/
 build/
 *.db
 data/*.db
-
+.venv/
+venv/
